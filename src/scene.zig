@@ -11,12 +11,16 @@ const sdl = mainspace.sdl;
 pub const ID = enum
 {
   Game,
-  Interface,
+  Manual,
+  AI,
+  Remote,
 };
 
 pub const scenes = std.EnumArray(ID, Self).init(.{
   .Game = @import("scenes/game.zig").scene,
-  .Interface = @import("scenes/interface.zig").scene,
+  .Manual = @import("scenes/manual_player.zig").scene,
+  .AI = @import("scenes/ai_player.zig").scene,
+  .Remote = @import("scenes/remote_player.zig").scene,
 });
 
 keybinds: []struct {

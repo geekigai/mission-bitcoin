@@ -14,12 +14,16 @@ const Space = @import("../space.zig");
 const Ring = @import("../ring.zig");
 const Player = @import("../player.zig");
 
+const manual = @import("manual_player.zig");
+
 const BoardCoord = Player.Pos;
 
 pub const totalTokens = 21;
 pub const TokenType = std.math.IntFittingRange(0, totalTokens);
 
 var gpa: Allocator = undefined;
+
+var ringTexture: *sdl.SDL_Texture = undefined;
 
 var spaceHasTokenTexture: *sdl.SDL_Texture = undefined;
 var spaceRerollTextures: [2]*sdl.SDL_Texture = undefined;
@@ -36,6 +40,7 @@ pub var board = std.ArrayList(Ring).empty;
 const Color = @Vector(4, f32);
 pub const PlayerEntry = struct {
   color: Color,
+  controller: ?*const Scene,
   value: Player,
 };
 pub var players: std.ArrayList(PlayerEntry) = .empty;
@@ -57,6 +62,7 @@ pub const scene = Scene{
 
   .init = struct {fn init(allocator: Allocator) !*const Scene
   {
+    log.info("Initializing game\n", .{});
     gpa = allocator;
 
     try loadTextures();
@@ -69,10 +75,18 @@ pub const scene = Scene{
     defer jsonOut.deinit();
 
     try players.ensureTotalCapacity(allocator, jsonOut.value.len);
+    log.debug("Player array position: {*}\n", .{players.items});
+
     for (jsonOut.value) |player|
     {
+      log.info("Loading player {any}\n", .{player.color});
+
       players.append(allocator, .{
         .color = player.color ++ .{1.0},
+        .controller = if (player.color[0] == 0.0)
+            Scene.scenes.getPtrConst(.Manual)
+          else
+            null,//Scene.scenes.getPtrConst(.AI),
         .value = .{
           .pos = Player.startingPos,
           .entryIndex = player.entryIndex,
@@ -87,6 +101,9 @@ pub const scene = Scene{
 
     currentPlayer =
       mainspace.rand.uintLessThan(u8, @intCast(players.items.len));
+    _ = players.items[currentPlayer].value.getMoves(
+      board.items, mainspace.rand.intRangeAtMost(u8, 1, 6)
+    );
 
     return &scene;
   }}.init,
@@ -97,50 +114,34 @@ pub const scene = Scene{
     mPos: @Vector(2, f32),
     mButtons: sdl.SDL_MouseButtonFlags) !bool
   {
-    _ = event;
-    _ = keys;
-    _ = mPos;
-    _ = mButtons;
+    if (players.items[currentPlayer].controller) |controller|
+    {
+      _ = try controller.getInput(event, keys, mPos, mButtons);
+    }
 
     return true;
   }}.getInput,
 
   .update = struct {fn update() !void
   {
-
+    if (players.items[currentPlayer].controller) |controller|
+    {
+      try controller.update();
+    } else
+    {
+      nextTurn();
+      _ = players.items[currentPlayer].value.getMoves(
+        board.items, mainspace.rand.intRangeAtMost(u8, 1, 6)
+      );
+    }
   }}.update,
   
   .render = struct {fn render() !void
   {
-    _ = sdl.SDL_SetRenderViewport(mainspace.renderer, &.{
-      .x = @intFromFloat(boardRenderArea()[0][0]),
-      .y = @intFromFloat(boardRenderArea()[0][1]),
-      .w = @intFromFloat(boardRenderArea()[1][0]),
-      .h = @intFromFloat(boardRenderArea()[1][1]),
-    });
-
     try renderSpaces(board.items);
 
     const winSize = boardRenderArea()[1];
     const size = @min(winSize[0], winSize[1]) * 0.05;
-
-    //for (moves) |move|
-    //{
-    //  if (move == null) break;
-
-    //  const pos = try getSpacePos(board.items, null, move);
-    //  if (!sdl.SDL_RenderRect(
-    //    mainspace.renderer,
-    //    &.{
-    //      .x = pos[0] - size*0.5,
-    //      .y = pos[1] - size*0.5,
-    //      .w = size,
-    //      .h = size,
-    //    }))
-    //  {
-    //    return error.SDL_RenderFail;
-    //  }
-    //}
 
     for (players.items, 0..players.items.len) |player, p|
     {
@@ -166,9 +167,12 @@ pub const scene = Scene{
       }
     }
 
-    _ = sdl.SDL_SetRenderViewport(mainspace.renderer, null);
+    if (players.items[currentPlayer].controller) |controller|
+    {
+      try controller.render();
+    }
 
-    try renderPlayerWallets();
+    try renderPlayerWallets(board.items);
   }}.render,
   
   .deinit = struct {fn deinit() !void
@@ -191,6 +195,10 @@ pub const scene = Scene{
 
 fn loadTextures() !void
 {
+  ringTexture = sdl.IMG_LoadTexture(
+    mainspace.renderer,
+    try directoryManager.getPath("assets/images/ring.svg"));
+
   spaceHasTokenTexture = sdl.IMG_LoadTexture(
     mainspace.renderer,
     try directoryManager.getPath("assets/images/spaces/token_space.svg"));
@@ -292,62 +300,92 @@ fn jsonFromFile(allocator: Allocator, T: type, path: []const u8)
   return try std.json.parseFromTokenSource(T, allocator, &jsonReader, .{});
 }
 
-fn renderSpaces(spaceArr: []Ring) !void
+fn renderSpaces(spaceArr: []Ring) error{SDL_RenderFail, InvalidPos}!void
 {
+  var noErr = true;
+  //const center = boardRenderCenter();
+
   for (spaceArr, 0..spaceArr.len) |ring, y|
   {
+    //const radius = getRingRadius(@intCast(spaceArr.len), @intCast(y));
+    //if (!sdl.SDL_RenderTexture(
+    //  mainspace.renderer, ringTexture, null,
+    //  &.{
+    //    .x = center[0]-radius,
+    //    .y = center[1]-radius,
+    //    .w = radius*2,
+    //    .h = radius*2,
+    //  }))
+    //{
+    //  return error.SDL_RenderFail;
+    //}
+
     for (ring.spaces, 0..ring.spaces.len) |space, x|
     {
       const pos =
         try boardToWindowPos(spaceArr, null, .{@intCast(x), @intCast(y)});
+
+      noErr &= sdl.SDL_SetRenderDrawColorFloat(
+        mainspace.renderer,
+        0.0, 0.25, 1.0, 1.0);
+
+      const nextPos = try boardToWindowPos(
+        spaceArr,
+        null,
+        .{@intCast((x+1)%ring.spaces.len), @intCast(y)});
+
+      noErr &= sdl.SDL_RenderLine(
+        mainspace.renderer,
+        pos[0], pos[1],
+        nextPos[0], nextPos[1]);
 
       if (space.jumpIndex) |i|
       {
         const linkPos =
           try boardToWindowPos(spaceArr, null, .{i, @intCast(y+1)});
 
-        if (!sdl.SDL_SetRenderDrawColorFloat(
+        noErr &= sdl.SDL_SetRenderDrawColorFloat(
           mainspace.renderer,
-          1.0, 0.5, 0.0, 1.0))
-        {
-          return error.SDL_RenderFail;
-        }
+          1.0, 0.5, 0.0, 1.0);
 
-        if (!sdl.SDL_RenderLine(
+        noErr &= sdl.SDL_RenderLine(
           mainspace.renderer,
           pos[0], pos[1],
-          linkPos[0], linkPos[1]))
-        {
-          return error.SDL_RenderFail;
-        }
+          linkPos[0], linkPos[1]);
       }
 
-      try renderSpace(space, pos);
+      try renderSpace(space, pos, getSpaceRadius(spaceArr, .{
+        @intCast(x),
+        @intCast(y)
+      }));
     }
   }
-}
 
-fn renderRing(ring: []const Space, radius: f32) !void
-{
-  const center = boardRenderCenter();
-
-  const angleOffset = (std.math.pi*2) / @as(f32, @floatFromInt(ring.len));
-  for (0..ring.len) |s|
+  if (!noErr)
   {
-    const angle = ringStartAngle() + angleOffset*@as(f32, @floatFromInt(s));
-    const dir = WinCoord{@cos(angle), @sin(angle)};
-
-    try renderSpace(
-      ring[s],
-      center + dir*@as(WinCoord, @splat(radius)));
+    return error.SDL_RenderFail;
   }
 }
 
-fn renderSpace(space: Space, pos: mainspace.WinCoord) !void
-{
-  const winSize = boardRenderArea()[1];
-  const radius = @min(winSize[0], winSize[1]) * 0.025;
+//fn renderRing(ring: []const Space, radius: f32) !void
+//{
+//  const center = boardRenderCenter();
+//
+//  const angleOffset = (std.math.pi*2) / @as(f32, @floatFromInt(ring.len));
+//  for (0..ring.len) |s|
+//  {
+//    const angle = ringStartAngle() + angleOffset*@as(f32, @floatFromInt(s));
+//    const dir = WinCoord{@cos(angle), @sin(angle)};
+//
+//    try renderSpace(
+//      ring[s],
+//      center + dir*@as(WinCoord, @splat(radius)));
+//  }
+//}
 
+fn renderSpace(space: Space, pos: mainspace.WinCoord, radius: f32)
+  error{SDL_RenderFail}!void
+{
   var noErr = true;
 
   if (space.hasToken != null)
@@ -397,8 +435,10 @@ fn renderSpace(space: Space, pos: mainspace.WinCoord) !void
   }
 }
 
-fn renderPlayerWallets() !void
+fn renderPlayerWallets(spaceArr: []Ring) error{SDL_RenderFail, InvalidPos}!void
 {
+  var noErr = true;
+
   const renderArea = walletRenderArea();
 
   const walletSize: WinCoord = .{
@@ -419,45 +459,28 @@ fn renderPlayerWallets() !void
       .{walletSize[0], walletSize[1]},
     };
 
-    if (!sdl.SDL_SetRenderDrawColorFloat(
+    noErr &= sdl.SDL_SetRenderDrawColorFloat(
       mainspace.renderer,
-      player.color[0],
-      player.color[1],
-      player.color[2],
-      player.color[3]))
-    {
-      return error.SDL_RenderFail;
-    }
-    if (!sdl.SDL_RenderFillRect(
+      player.color[0], player.color[1], player.color[2], player.color[3]);
+    noErr &= sdl.SDL_RenderFillRect(
       mainspace.renderer, &.{
         .x = walletArea[0][0],
         .y = walletArea[0][1],
         .w = walletArea[1][0],
         .h = walletArea[1][1],
-      }))
-    {
-      return error.SDL_RenderFail;
-    }
+      });
 
-    if (!sdl.SDL_SetRenderDrawColorFloat(
+    noErr &= sdl.SDL_SetRenderDrawColorFloat(
       mainspace.renderer,
-      1.0,
-      0.0,
-      0.0,
-      1.0))
-    {
-      return error.SDL_RenderFail;
-    }
-    if (!sdl.SDL_RenderRect(
+      1.0, 0.0, 0.0, 1.0);
+    noErr &= sdl.SDL_RenderRect(
       mainspace.renderer, &.{
         .x = walletArea[0][0] + walletArea[1][0]*0.05,
         .y = walletArea[0][1] + walletArea[1][1]*0.025,
         .w = walletArea[1][0]*0.4,
         .h = walletArea[1][1]*0.95,
-      }))
-    {
-      return error.SDL_RenderFail;
-    }
+      });
+
     try renderTokenStack(
       .{
         walletArea[0][0] + walletArea[1][0]*0.25,
@@ -467,25 +490,17 @@ fn renderPlayerWallets() !void
       player.value.exchangeTokens
     );
 
-    if (!sdl.SDL_SetRenderDrawColorFloat(
+    noErr &= sdl.SDL_SetRenderDrawColorFloat(
       mainspace.renderer,
-      0.0,
-      0.0,
-      1.0,
-      1.0))
-    {
-      return error.SDL_RenderFail;
-    }
-    if (!sdl.SDL_RenderRect(
+      0.0, 0.0, 1.0, 1.0);
+    noErr &= sdl.SDL_RenderRect(
       mainspace.renderer, &.{
         .x = walletArea[0][0] + walletArea[1][0]*0.55,
         .y = walletArea[0][1] + walletArea[1][1]*0.025,
         .w = walletArea[1][0]*0.4,
         .h = walletArea[1][1]*0.95,
-      }))
-    {
-      return error.SDL_RenderFail;
-    }
+      });
+
     try renderTokenStack(
       .{
         walletArea[0][0] + walletArea[1][0]*0.75,
@@ -495,15 +510,27 @@ fn renderPlayerWallets() !void
       player.value.coldStorageTokens
     );
 
+    const radius =
+      getSpaceRadius(spaceArr, .{0, @intCast(spaceArr.len-1)}) * 0.5;
     try renderTokenStack(
-      try boardToWindowPos(board.items, @intCast(p), Player.endingPos),
-      20,
-      player.value.lostTokens
+      try boardToWindowPos(
+        spaceArr,
+        @intCast(players.items.len-p-1),
+        Player.endingPos
+      ) + WinCoord{0, radius*0.5},
+      radius,
+      players.items[players.items.len-p-1].value.lostTokens
     );
+  }
+
+  if (!noErr)
+  {
+    return error.SDL_RenderFail;
   }
 }
 
-fn renderTokenStack(pos: WinCoord, radius: f32, count: TokenType) !void
+fn renderTokenStack(pos: WinCoord, radius: f32, count: TokenType)
+  error{SDL_RenderFail}!void
 {
   for (0..count) |t|
   {
@@ -540,7 +567,7 @@ pub fn boardToWindowPos(spaceArr: []Ring, playerIndex: ?u8, pos: BoardCoord)
       if (pos == Player.startingPos)
         @min(winSize[0], winSize[1]) * 0.6
       else
-        10.0;
+        getSpaceRadius(spaceArr, .{0, @intCast(spaceArr.len-1)}) * 0.5;
 
     return center + dir*@as(WinCoord, @splat(dis));
   }
@@ -593,6 +620,25 @@ pub fn getRingRadius(ringCount: u8, index: u8) f32
   const radiusOffset = maxRadius / @as(f32, @floatFromInt(ringCount-1));
 
   return maxRadius - radiusOffset*@as(f32, @floatFromInt(index));
+}
+
+fn getSpaceRadius(spaceArr: []Ring, pos: BoardCoord) f32
+{
+  if (pos == null)
+  {
+    return 0.0;
+  }
+
+  const winSize = boardRenderArea()[1];
+  const boardSize = @min(winSize[0], winSize[1]);
+
+  if (pos.?[1] < spaceArr.len-1)
+  {
+    return boardSize * @as(f32, 0.025);
+  } else
+  {
+    return boardSize * @as(f32, 0.05);
+  }
 }
 
 fn ringStartAngle(ringIndex: u8) f32

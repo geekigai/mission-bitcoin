@@ -119,14 +119,11 @@ fn update(appstate: ?*anyopaque) callconv(.c) sdl.SDL_AppResult
     {
       lastFrameTick = std.time.milliTimestamp();
 
-      for (Scene.scenes.values) |scene|
+      Scene.scenes.get(.Game).update() catch |e|
       {
-        scene.update() catch |e|
-        {
-          log.err("Failed to update scene: {}\n", .{e});
-          return sdl.SDL_APP_FAILURE;
-        };
-      }
+        log.err("Failed to update scene: {}\n", .{e});
+        return sdl.SDL_APP_FAILURE;
+      };
 
       if (!sdl.SDL_SetRenderDrawColorFloat(renderer, 0.0, 0.0, 0.0, 1.0))
       {
@@ -137,14 +134,11 @@ fn update(appstate: ?*anyopaque) callconv(.c) sdl.SDL_AppResult
         log.err("Failed to clear screen\n", .{});
       }
 
-      for (Scene.scenes.values) |scene|
+      Scene.scenes.get(.Game).render() catch |e|
       {
-        scene.render() catch |e|
-        {
-          log.err("Failed to render scene: {}\n", .{e});
-          return sdl.SDL_APP_FAILURE;
-        };
-      }
+        log.err("Failed to render scene: {}\n", .{e});
+        return sdl.SDL_APP_FAILURE;
+      };
 
       if (!sdl.SDL_RenderPresent(renderer))
       {
@@ -176,17 +170,12 @@ fn handleEvent(appstate: ?*anyopaque, event: ?*sdl.SDL_Event) callconv(.c) sdl.S
   const mButtons: sdl.SDL_MouseButtonFlags =
     sdl.SDL_GetMouseState(&mPos[0], &mPos[1]);
 
-  for (Scene.scenes.values) |scene|
-  {
-    if (!(scene.getInput(event.?.*, keys, mPos, mButtons) catch |e|
-      {
-        log.err("Scene failed to get event: {}\n", .{e});
-        return sdl.SDL_APP_FAILURE;
-      }))
+  _ =
+    Scene.scenes.get(.Game).getInput(event.?.*, keys, mPos, mButtons) catch |e|
     {
-      break;
-    }
-  }
+      log.err("Scene failed to get event: {}\n", .{e});
+      return sdl.SDL_APP_FAILURE;
+    };
 
   return sdl.SDL_APP_CONTINUE;
 }

@@ -1,15 +1,21 @@
 const Self = @This();
 
 const std = @import("std");
+const log = std.log;
 
 const Ring = @import("ring.zig");
 const game = @import("scenes/game.zig");
+
+const mainspace = @import("main.zig");
 
 pub const Pos = ?@Vector(2, u8);
 
 pub const startingPos = null;
 pub const endingPos: Pos = @splat(
   std.math.maxInt(@typeInfo(@typeInfo(Pos).optional.child).vector.child));
+
+var moveBuffer: [4]Pos = undefined;
+pub var moves: []Pos = moveBuffer[0..0];
 
 pos: Pos,
 entryIndex: u8,
@@ -18,16 +24,74 @@ exchangeTokens: game.TokenType = 0,
 coldStorageTokens: game.TokenType = 0,
 lostTokens: game.TokenType = 0,
 
-/// Returns a list of possible destination positions
-pub fn getMoves(self: *Self, parent: []Ring, steps: u8) [4]Pos
+pub fn move(self: *Self, parent: []Ring, pos: Pos) void
 {
-  var resultBuffer: [4]Pos = @splat(null);
-  var result: []Pos = resultBuffer[0..0];
+  self.pos = pos;
+
+  const ring = &parent[pos.?[1]];
+  const space = &ring.spaces[pos.?[0]];
+
+  defer {
+    log.info("Getting moves for player {}\n", .{game.currentPlayer});
+    _ = game.players.items[game.currentPlayer].value.getMoves(
+      parent, mainspace.rand.intRangeAtMost(u8, 1, 6)
+    );
+  }
+
+  if (pos != null and space.hasToken == true)
+  {
+    self.exchangeTokens += @intFromBool(ring.removeToken(pos.?[0]));
+
+    game.nextTurn();
+
+    return;
+  }
+
+  switch (space.type)
+  {
+    .Default => {},
+    .ColdStorage => {
+      self.coldStorageTokens += self.exchangeTokens;
+      self.exchangeTokens = 0;
+    },
+    .ExchangeHack => {
+      for (game.players.items) |*player|
+      {
+        player.value.lostTokens += player.value.exchangeTokens;
+        player.value.exchangeTokens = 0;
+      }
+    },
+    .OrangePill => {
+      // TODO: When this space is landed on, the current player should select another player to give one token to
+    },
+    .Exec6102 => {
+      for (game.players.items) |*player|
+      {
+        player.value.lostTokens = 0;
+        player.value.exchangeTokens = 0;
+      }
+    },
+    .Moon => {
+      self.coldStorageTokens += self.lostTokens;
+      self.lostTokens = 0;
+    },
+  }
+
+  if (!space.reroll)
+  {
+    game.nextTurn();
+  }
+}
+
+/// Populates moveBuffer with available moves and returns moves slice
+pub fn getMoves(self: *Self, parent: []Ring, steps: u8) []Pos
+{
+  moves = moveBuffer[0..0];
 
   if (steps == 0)
   {
-    resultBuffer[0] = self.pos;
-    return resultBuffer;
+    moveBuffer[0] = self.pos;
+    return moves;
   }
 
   const StackElement = struct
@@ -63,8 +127,8 @@ pub fn getMoves(self: *Self, parent: []Ring, steps: u8) [4]Pos
 
     if (top.depth == 0)
     {
-      result.len += 1;
-      result[result.len-1] = top.pos;
+      moves.len += 1;
+      moves[moves.len-1] = top.pos;
 
       continue;
     }
@@ -140,53 +204,5 @@ pub fn getMoves(self: *Self, parent: []Ring, steps: u8) [4]Pos
     }
   }
 
-  return resultBuffer;
-}
-
-pub fn move(self: *Self, parent: []Ring, pos: Pos) void
-{
-  self.pos = pos;
-
-  const ring = &parent[pos.?[1]];
-  const space = &ring.spaces[pos.?[0]];
-
-  if (pos != null and space.hasToken == true)
-  {
-    self.exchangeTokens += @intFromBool(ring.removeToken(pos.?[0]));
-  }
-
-  switch (space.type)
-  {
-    .Default => {},
-    .ColdStorage => {
-      //self.coldStorageTokens += self.exchangeTokens;
-      //self.exchangeTokens = 0;
-    },
-    .ExchangeHack => {
-      for (game.players.items) |*player|
-      {
-        player.value.lostTokens += player.value.exchangeTokens;
-        player.value.exchangeTokens = 0;
-      }
-    },
-    .OrangePill => {
-      // TODO: When this space is landed on, the current player should select another player to give one token to
-    },
-    .Exec6102 => {
-      for (game.players.items) |*player|
-      {
-        player.value.lostTokens = 0;
-        player.value.exchangeTokens = 0;
-      }
-    },
-    .Moon => {
-      self.coldStorageTokens += self.lostTokens;
-      self.lostTokens = 0;
-    },
-  }
-
-  if (!space.reroll)
-  {
-    game.nextTurn();
-  }
+  return moves;
 }

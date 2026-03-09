@@ -17,10 +17,11 @@
 - Connect rings (done)
 - Render tokens (done)
 - Add space functionality (done)
+- Render circle around rings (done)
+- Render player wallets (done)
+- Switch to GPU API
 - Add orange pill functionality
-- Render player wallets
 - Add moon
-- Render circle around rings
 - Add AI functionality
 - Add networking
 - Add movement animations
