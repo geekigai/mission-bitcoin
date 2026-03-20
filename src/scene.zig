@@ -10,6 +10,7 @@ const sdl = mainspace.sdl;
 
 pub const ID = enum
 {
+  Menu,
   Game,
   Manual,
   AI,
@@ -17,6 +18,7 @@ pub const ID = enum
 };
 
 pub const scenes = std.EnumArray(ID, Self).init(.{
+  .Menu = @import("scenes/menu.zig").scene,
   .Game = @import("scenes/game.zig").scene,
   .Manual = @import("scenes/manual_player.zig").scene,
   .AI = @import("scenes/ai_player.zig").scene,
