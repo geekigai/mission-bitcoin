@@ -33,13 +33,21 @@ pub fn getPath(relativePath: []const u8) ![:0]const u8
       dir.access(relativePath, .{}) catch continue;
       dir.close();
 
-      const resultPath: [:0]u8 = @ptrCast(try pathAllocator.allocator().alloc(u8, dirPathLen+1+relativePath.len));
+      // Normalize path separators to backslashes on Windows
+      var normalizedPath = try pathAllocator.allocator().alloc(u8, relativePath.len);
+      for (relativePath, 0..) |c, i| {
+        normalizedPath[i] = if (c == '/') path.sep else c;
+      }
+
+      const resultPath: [:0]u8 = @ptrCast(try pathAllocator.allocator().alloc(u8, dirPathLen+1+normalizedPath.len+1));
       @memcpy(resultPath[0..dirPathLen], dirPath[0..dirPathLen]);
       resultPath[dirPathLen] = path.sep;
-      @memcpy(resultPath[dirPathLen+1..dirPathLen+1+relativePath.len], relativePath);
-      resultPath[resultPath.len] = 0;
+      @memcpy(resultPath[dirPathLen+1..dirPathLen+1+normalizedPath.len], normalizedPath);
+      resultPath[dirPathLen+1+normalizedPath.len] = 0;
 
-      return resultPath;
+      const finalPath = resultPath[0..dirPathLen+1+normalizedPath.len :0];
+      log.info("SUCCESS: Constructed path: \"{s}\"\n", .{finalPath});
+      return finalPath;
     } else
     {
       log.info("skipping dir\n", .{});
@@ -50,9 +58,24 @@ pub fn getPath(relativePath: []const u8) ![:0]const u8
   fs.makeDirAbsolute(dataDirPath) catch |e| if (e != std.posix.MakeDirError.PathAlreadyExists) return e;
   var dataDir = try fs.openDirAbsolute(dataDirPath, .{.access_sub_paths = false});
 
-  const relativePathDir = relativePath[0..std.mem.indexOfSentinel(u8, path.sep, @ptrCast(relativePath))];
+  // Normalize path separators
+  var normalizedPath = try pathAllocator.allocator().alloc(u8, relativePath.len);
+  for (relativePath, 0..) |c, i| {
+    normalizedPath[i] = if (c == '/') path.sep else c;
+  }
+
+  const lastSepIndex = std.mem.lastIndexOfScalar(u8, normalizedPath, path.sep) orelse {
+    // No separator found, create file directly in dataDir
+    const finalPath = try path.joinZ(pathAllocator.allocator(), &.{dataDirPath, normalizedPath});
+    log.info("SUCCESS: Created path in dataDir (no sep): \"{s}\"\n", .{finalPath});
+    return finalPath;
+  };
+  
+  const relativePathDir = normalizedPath[0..lastSepIndex];
   try dataDir.makePath(relativePathDir);
-  return path.joinZ(pathAllocator.allocator(), &.{dataDirPath, relativePath});
+  const finalPath = try path.joinZ(pathAllocator.allocator(), &.{dataDirPath, normalizedPath});
+  log.info("SUCCESS: Created path in dataDir (with sep): \"{s}\"\n", .{finalPath});
+  return finalPath;
 }
 
 fn findResourcePaths() void

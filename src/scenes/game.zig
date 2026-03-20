@@ -23,7 +23,7 @@ pub const TokenType = std.math.IntFittingRange(0, totalTokens);
 
 var gpa: Allocator = undefined;
 
-var ringTexture: *sdl.SDL_Texture = undefined;
+//var ringTexture: *sdl.SDL_Texture = undefined;
 
 var spaceHasTokenTexture: *sdl.SDL_Texture = undefined;
 var spaceRerollTextures: [2]*sdl.SDL_Texture = undefined;
@@ -83,10 +83,7 @@ pub const scene = Scene{
 
       players.append(allocator, .{
         .color = player.color ++ .{1.0},
-        .controller = if (player.color[0] == 0.0)
-            Scene.scenes.getPtrConst(.Manual)
-          else
-            null,//Scene.scenes.getPtrConst(.AI),
+.controller = Scene.scenes.getPtrConst(.Manual),
         .value = .{
           .pos = Player.startingPos,
           .entryIndex = player.entryIndex,
@@ -195,9 +192,9 @@ pub const scene = Scene{
 
 fn loadTextures() !void
 {
-  ringTexture = sdl.IMG_LoadTexture(
-    mainspace.renderer,
-    try directoryManager.getPath("assets/images/ring.svg"));
+//  ringTexture = sdl.IMG_LoadTexture(
+//    mainspace.renderer,
+//    try directoryManager.getPath("assets/images/ring.svg"));
 
   spaceHasTokenTexture = sdl.IMG_LoadTexture(
     mainspace.renderer,

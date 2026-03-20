@@ -52,6 +52,8 @@ var lastFrameTick: i64 = 0;
 
 pub var allocator = AllocatorType(.{}).init;
 
+pub var currentScene: Scene.ID = .Menu;
+
 fn init(appstate: ?*?*anyopaque, argc: i32, argv: ?[*]?[*:0]u8) callconv(.c) sdl.SDL_AppResult
 {
   _ = appstate;
@@ -67,6 +69,14 @@ fn init(appstate: ?*?*anyopaque, argc: i32, argv: ?[*]?[*:0]u8) callconv(.c) sdl
   {
     log.err(
       "SDL failed to initialize video drivers: {s}\n",
+      .{sdl.SDL_GetError()});
+    return sdl.SDL_APP_FAILURE;
+  }
+
+  if (!sdl.TTF_Init())
+  {
+    log.err(
+      "SDL_ttf failed to initialize: {s}\n",
       .{sdl.SDL_GetError()});
     return sdl.SDL_APP_FAILURE;
   }
@@ -90,13 +100,6 @@ fn init(appstate: ?*?*anyopaque, argc: i32, argv: ?[*]?[*:0]u8) callconv(.c) sdl
     break:blk .{optionalWindow.?, optionalRenderer.?};
   };
 
-  //if (!sdl.SDL_SetRenderLogicalPresentation(renderer,
-  //  512, 512,
-  //  sdl.SDL_LOGICAL_PRESENTATION_LETTERBOX))
-  //{
-  //  return sdl.SDL_APP_FAILURE;
-  //}
-
   for (Scene.scenes.values) |scene|
   {
     _ = scene.init(allocator.allocator()) catch |e|
@@ -119,7 +122,7 @@ fn update(appstate: ?*anyopaque) callconv(.c) sdl.SDL_AppResult
     {
       lastFrameTick = std.time.milliTimestamp();
 
-      Scene.scenes.get(.Game).update() catch |e|
+      Scene.scenes.get(currentScene).update() catch |e|
       {
         log.err("Failed to update scene: {}\n", .{e});
         return sdl.SDL_APP_FAILURE;
@@ -134,7 +137,7 @@ fn update(appstate: ?*anyopaque) callconv(.c) sdl.SDL_AppResult
         log.err("Failed to clear screen\n", .{});
       }
 
-      Scene.scenes.get(.Game).render() catch |e|
+      Scene.scenes.get(currentScene).render() catch |e|
       {
         log.err("Failed to render scene: {}\n", .{e});
         return sdl.SDL_APP_FAILURE;
@@ -171,7 +174,7 @@ fn handleEvent(appstate: ?*anyopaque, event: ?*sdl.SDL_Event) callconv(.c) sdl.S
     sdl.SDL_GetMouseState(&mPos[0], &mPos[1]);
 
   _ =
-    Scene.scenes.get(.Game).getInput(event.?.*, keys, mPos, mButtons) catch |e|
+    Scene.scenes.get(currentScene).getInput(event.?.*, keys, mPos, mButtons) catch |e|
     {
       log.err("Scene failed to get event: {}\n", .{e});
       return sdl.SDL_APP_FAILURE;
