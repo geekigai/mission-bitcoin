@@ -52,7 +52,13 @@ var lastFrameTick: i64 = 0;
 
 pub var allocator = AllocatorType(.{}).init;
 
-pub var currentScene: Scene.ID = .Menu;
+// Scene management
+pub const SceneID = enum {
+  Menu,
+  Game,
+};
+
+pub var currentScene: SceneID = .Menu;
 
 fn init(appstate: ?*?*anyopaque, argc: i32, argv: ?[*]?[*:0]u8) callconv(.c) sdl.SDL_AppResult
 {
@@ -100,9 +106,9 @@ fn init(appstate: ?*?*anyopaque, argc: i32, argv: ?[*]?[*:0]u8) callconv(.c) sdl
     break:blk .{optionalWindow.?, optionalRenderer.?};
   };
 
-  for (Scene.scenes.values) |scene|
+  for (Scene.scenes.values) |scene_val|
   {
-    _ = scene.init(allocator.allocator()) catch |e|
+    _ = scene_val.init(allocator.allocator()) catch |e|
     {
       log.err("Failed to initialize scene {}\n", .{e});
       return sdl.SDL_APP_FAILURE;
@@ -122,7 +128,10 @@ fn update(appstate: ?*anyopaque) callconv(.c) sdl.SDL_AppResult
     {
       lastFrameTick = std.time.milliTimestamp();
 
-      Scene.scenes.get(currentScene).update() catch |e|
+      // Get the current scene based on currentScene ID
+      const current_scene = Scene.scenes.get(currentScene);
+      
+      current_scene.update() catch |e|
       {
         log.err("Failed to update scene: {}\n", .{e});
         return sdl.SDL_APP_FAILURE;
@@ -137,7 +146,7 @@ fn update(appstate: ?*anyopaque) callconv(.c) sdl.SDL_AppResult
         log.err("Failed to clear screen\n", .{});
       }
 
-      Scene.scenes.get(currentScene).render() catch |e|
+      current_scene.render() catch |e|
       {
         log.err("Failed to render scene: {}\n", .{e});
         return sdl.SDL_APP_FAILURE;
@@ -173,8 +182,10 @@ fn handleEvent(appstate: ?*anyopaque, event: ?*sdl.SDL_Event) callconv(.c) sdl.S
   const mButtons: sdl.SDL_MouseButtonFlags =
     sdl.SDL_GetMouseState(&mPos[0], &mPos[1]);
 
-  _ =
-    Scene.scenes.get(currentScene).getInput(event.?.*, keys, mPos, mButtons) catch |e|
+  // Get the current scene and handle input
+  const current_scene = Scene.scenes.get(currentScene);
+  
+  _ = current_scene.getInput(event.?.*, keys, mPos, mButtons) catch |e|
     {
       log.err("Scene failed to get event: {}\n", .{e});
       return sdl.SDL_APP_FAILURE;
@@ -192,9 +203,9 @@ fn deinit(appstate: ?*anyopaque, result: sdl.SDL_AppResult) callconv(.c) void
     log.err("Returned a failure\n", .{});
   }
 
-  for (Scene.scenes.values) |scene|
+  for (Scene.scenes.values) |scene_val|
   {
-    scene.deinit() catch {};
+    scene_val.deinit() catch {};
   }
 
   sdl.SDL_DestroyRenderer(renderer);

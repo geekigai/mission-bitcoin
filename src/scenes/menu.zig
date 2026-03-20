@@ -128,7 +128,9 @@ pub const scene = Scene{
                 if (selectedRocket != null and isPointInRect(pos, getButtonRect(playButton))) {
                     log.info("Play button clicked with rocket: {?}\n", .{selectedRocket});
                     game.currentPlayer = selectedRocket.?;
-                    mainspace.currentScene = .Game;
+                    // Transition to game scene
+                    const gameScene = Scene.scenes.get(.Game);
+                    try gameScene.init(gpa);
                 }
 
                 if (isPointInRect(pos, getButtonRect(howToPlayButton))) {
